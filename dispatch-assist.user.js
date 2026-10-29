@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.0.1
+// @version      2.0.2
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -42,6 +42,11 @@
       useTransportProbability: true,
       transportGracePct: 10,
       maxAmbulancesPerClick: 0,     // 0 = no cap. Set e.g. 20 to stop huge incidents ticking 100+ ambulances at once
+      // The game adds an Ambulance Officer and Mass Casualty Equipment itself once a big incident has
+      // patients, but they are missing from the mission data, so a fresh call never asks for them.
+      // If the mission is guaranteed at least this many patients (or already shows this many), send one of
+      // each straight away. 0 = off (then they only get sent once the game lists them as missing).
+      largeIncidentMinPatients: 10,
     },
     rememberMinutes: 30,
   };
@@ -357,6 +362,17 @@
       if (req) list.push({ req, label: req.captions[0], count });
       else unknown.push(`${count} × ${prettyKey(key)}`);
     }
+    // Big incidents: the game will ask for an Ambulance Officer and Mass Casualty Equipment later, so send them now
+    const bigMin = CFG.own.largeIncidentMinPatients;
+    if (bigMin > 0) {
+      const sure = Math.max(mtype.patientsMin || 0, document.querySelectorAll('.mission_patient').length);
+      if (sure >= bigMin) {
+        for (const key of ['kdow_orgl', 'mass_casualty_equipment']) {
+          const req = REQS.find((r) => r.keys.includes(key));
+          if (req && !list.some((n) => n.req === req)) list.push({ req, label: `${req.captions[0]} (large incident)`, count: 1 });
+        }
+      }
+    }
     subtractDriving(list);
     return { source: 'fresh', list, unknown, notes };
   }
@@ -477,13 +493,16 @@
   let typesPromise = null;
   function missionTypes() {
     if (!typesPromise) {
-      const cached = ls.get('dispatchassist_mission_types_v2', null);
+      const cached = ls.get('dispatchassist_mission_types_v3', null);
       if (cached && Date.now() - cached.t < 24 * 3600 * 1000) typesPromise = Promise.resolve(cached.d);
       else {
         typesPromise = fetch('/einsaetze.json').then((r) => r.json()).then((arr) => {
           const d = {};
-          arr.forEach((m) => { d[m.id] = { requirements: m.requirements, chances: m.chances, swatPersonnel: (m.additional || {}).swat_personnel || 0 }; });
-          ls.set('dispatchassist_mission_types_v2', { t: Date.now(), d });
+          arr.forEach((m) => {
+            const a = m.additional || {};
+            d[m.id] = { requirements: m.requirements, chances: m.chances, swatPersonnel: a.swat_personnel || 0, patientsMin: a.possible_patient_min || 0 };
+          });
+          ls.set('dispatchassist_mission_types_v3', { t: Date.now(), d });
           return d;
         });
       }
