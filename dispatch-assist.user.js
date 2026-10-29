@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.1.1
+// @version      2.2.0
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -51,6 +51,8 @@
       keepRoleVehiclesFree: true,
     },
     rememberMinutes: 30,
+    // Show a "💰 high payer" badge in the banner when a mission pays more than this many credits. 0 = off.
+    highPayCredits: 5000,
   };
   // ------------------------------
 
@@ -605,6 +607,17 @@
     });
   }
 
+  // The mission list on the main page carries each mission's exact payout (including variant bonuses)
+  function currentMissionCredits() {
+    const m = location.pathname.match(/^\/missions\/(\d+)/);
+    const doc = m && mainDoc();
+    const row = doc && doc.getElementById('mission_' + m[1]);
+    try {
+      const s = JSON.parse((row && row.getAttribute('data-sortable-by')) || '{}');
+      return typeof s.average_credits === 'number' ? s.average_credits : null;
+    } catch { return null; }
+  }
+
   // ================= Shared helpers =================
   function vehicleRows() {
     // Sorted nearest first
@@ -644,7 +657,11 @@
     const colours = { ok: ['#dff0d8', '#3c763d'], info: ['#d9edf7', '#31708f'], warn: ['#fcf8e3', '#8a6d3b'] }[kind] || ['#eee', '#333'];
     el.style.background = colours[0];
     el.style.color = colours[1];
-    el.innerHTML = `<span>🚒 ${html}</span>`;
+    const credits = currentMissionCredits();
+    const pay = credits && CFG.highPayCredits && credits > CFG.highPayCredits
+      ? `<b style="background:#d9534f;color:#fff;padding:1px 6px;border-radius:3px;margin-right:6px">💰 ${credits.toLocaleString('en-GB')} credits</b>`
+      : '';
+    el.innerHTML = `<span>${pay}🚒 ${html}</span>`;
     if (allianceMissionId) {
       el.appendChild(button('Skip → next alliance', () => skipToNext(allianceMissionId)));
     }
