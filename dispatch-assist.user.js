@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.0.2
+// @version      2.0.3
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -291,6 +291,16 @@
       if (existing) existing.count = Math.max(existing.count, need);
       else needs.list.push({ req: ambReq, label: 'ambulance (patients)', count: need });
       needs.patientInfo = `${need} ambulance${need === 1 ? '' : 's'} for ${transportYes + transportNo + unknown} patient${transportYes + transportNo + unknown === 1 ? '' : 's'}${how}`;
+    }
+
+    // Patients saying "We need: Mass Casualty Equipment": one unit covers the whole incident,
+    // so send one unless there is already one on scene or on its way
+    const mceReq = REQS.find((r) => r.keys.includes('mass_casualty_equipment'));
+    const needsMce = patients.some((p) => [...p.querySelectorAll('.alert')].some((a) => /We need:.*Mass Casualty Equipment/i.test(a.textContent)));
+    if (needsMce && !needs.list.some((n) => n.req === mceReq)) {
+      const isMce = (e) => { const t = +e.getAttribute('vehicle_type_id'); return attrsMatch(t, (a) => (typeAttrs[t] || {})[a], mceReq); };
+      const mceHere = [...document.querySelectorAll('#mission_vehicle_at_mission tbody tr [vehicle_type_id], #mission_vehicle_driving tbody tr [vehicle_type_id]')].some(isMce);
+      if (!mceHere) needs.list.push({ req: mceReq, label: 'mass casualty equipment (patients)', count: 1 });
     }
 
     // Other per-patient needs the script can't fill yet (e.g. Critical Care) get flagged
