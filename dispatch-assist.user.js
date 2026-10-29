@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.1.0
+// @version      2.1.1
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -111,6 +111,10 @@
   //  per:    people on each of those vehicles
   const PERSONNEL = [
     { match: /armed response personnel/i, req: ARV_REQ, perVehicle: () => CFG.own.armedPersonnelPerArv, label: 'ARV (armed personnel)' },
+    // HazMat-trained people ride on the same vehicles that count as hazmat units (e.g. an OSU carries 2).
+    // Both this and the plain "hazmat unit" vehicle need are filled from the same vehicles, so you get
+    // whichever is larger: the vehicles asked for, or people ÷ 2.
+    { match: /^hazmat units?$/i, key: 'gw_gefahrgut', req: REQS.find((r) => r.keys.includes('hazmat_vehicles')), perVehicle: () => 2, label: 'hazmat unit (trained personnel)' },
     { match: /^police sergeants?$/i, key: 'police_sergeant', req: { keys: [], captions: [], vtype: 'SGT' }, perVehicle: () => 2, label: 'SGT vehicle (Police Sergeant)' },
     { match: /^police inspectors?$/i, key: 'police_inspector', req: { keys: [], captions: [], vtype: 'INSP' }, perVehicle: () => 2, label: 'INSP vehicle (Police Inspector)' },
     { match: /^level 1 public order officers?$/i, key: 'level_1_public_order', req: { keys: [], captions: [], vtype: 'POONE' }, perVehicle: () => 9, label: 'POONE vehicle (Public Order L1)' },
