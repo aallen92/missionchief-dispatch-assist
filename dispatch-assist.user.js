@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.2.0
+// @version      2.2.1
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -82,7 +82,7 @@
     { keys: ['battalion_chief_vehicles'], captions: ['fire officer', 'fire officer or iccu'], attr: 'elw1_or_elw2', group: 'command' },
     { keys: ['water_tankers'], captions: ['water carrier'], attr: 'gwl2wasser' },
     { keys: ['hazmat_vehicles'], captions: ['hazmat units or cbrn vehicle', 'hazmat unit', 'cbrn vehicle'], attr: 'gwgefahrgut' },
-    { keys: ['mobile_air_vehicles'], captions: ['breathing apparatus support unit'], attr: 'gwa' },
+    { keys: ['mobile_air_vehicles'], captions: ['breathing apparatus support unit', 'basu'], attr: 'gwa' },
     { keys: ['foam'], captions: ['foam tender', 'foam tenders or riv'], attr: 'foam' },
     { keys: ['emergency_welfare'], captions: ['welfare vehicle', 'crew welfare vehicle'], attr: 'emergency_welfare_value' },
     { keys: ['k9'], captions: ['dog support unit', 'dsu'], attr: 'k9' },
