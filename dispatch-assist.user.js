@@ -1,9 +1,11 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.0.0
+// @version      2.0.1
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
+// @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
+// @downloadURL  https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
 // @match        https://www.missionchief.co.uk/*
 // @grant        none
 // @run-at       document-idle
