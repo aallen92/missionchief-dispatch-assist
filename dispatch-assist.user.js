@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.0.3
+// @version      2.1.0
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -47,6 +47,8 @@
       // If the mission is guaranteed at least this many patients (or already shows this many), send one of
       // each straight away. 0 = off (then they only get sent once the game lists them as missing).
       largeIncidentMinPatients: 10,
+      // Keep your SGT / INSP / POONE / POTWO vehicles for their own role instead of using them as ordinary police cars
+      keepRoleVehiclesFree: true,
     },
     rememberMinutes: 30,
   };
@@ -102,9 +104,23 @@
 
   // Personnel shortfalls that are covered by sending whole vehicles
   const ARV_REQ = { keys: [], captions: [], attr: 'swat_suv', group: 'arv' };
+  // Personnel that live on vehicles you've put in your own vehicle categories.
+  //  vtype:  the category name shown for the vehicle in the dispatch list
+  //  key:    the name used in the game's mission data for fresh calls
+  //  match:  how the game words it in the "Missing Personnel" box
+  //  per:    people on each of those vehicles
   const PERSONNEL = [
     { match: /armed response personnel/i, req: ARV_REQ, perVehicle: () => CFG.own.armedPersonnelPerArv, label: 'ARV (armed personnel)' },
+    { match: /^police sergeants?$/i, key: 'police_sergeant', req: { keys: [], captions: [], vtype: 'SGT' }, perVehicle: () => 2, label: 'SGT vehicle (Police Sergeant)' },
+    { match: /^police inspectors?$/i, key: 'police_inspector', req: { keys: [], captions: [], vtype: 'INSP' }, perVehicle: () => 2, label: 'INSP vehicle (Police Inspector)' },
+    { match: /^level 1 public order officers?$/i, key: 'level_1_public_order', req: { keys: [], captions: [], vtype: 'POONE' }, perVehicle: () => 9, label: 'POONE vehicle (Public Order L1)' },
+    { match: /^level 2 public order officers?$/i, key: 'level_2_public_order', req: { keys: [], captions: [], vtype: 'POTWO' }, perVehicle: () => 9, label: 'POTWO vehicle (Public Order L2)' },
   ];
+  const ROLE_VTYPES = new Set(PERSONNEL.map((p) => p.req.vtype).filter(Boolean));
+  function personnelByKey(key, n) {
+    const p = PERSONNEL.find((x) => x.key === key);
+    return p ? { req: p.req, label: p.label, count: Math.ceil(+n / Math.max(1, p.perVehicle())), personnel: +n } : null;
+  }
   function personnelEntry(text) {
     const m = text.match(/^(\d+)\s*x?\s+(.+)$/i);
     if (!m) return null;
@@ -115,6 +131,7 @@
 
   const SS_DONE = 'hrlfo_done';
   const LS_TYPES = 'dispatchassist_type_attrs';
+  const LS_ROLES = 'dispatchassist_role_vehicles'; // vehicle id -> own category name (SGT, INSP, ...)
 
   const store = (s) => ({
     get(k, d) { try { const v = s.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -157,6 +174,7 @@
   function initMissionPage(missionId) {
     if (!document.getElementById('vehicle_show_table_body_all')) return; // no dispatch list (finished mission etc.)
     learnTypeAttrs();
+    learnRoleVehicles();
     const kind = missionKind(missionId);
     if (kind === 'alliance' && CFG.alliance.enabled) initAllianceMission(missionId);
     else if (kind === 'own' && CFG.own.enabled) initOwnMission(missionId);
@@ -362,6 +380,16 @@
       if (e) list.push(e);
     }
     const unknown = [];
+    // Personnel needs (Police Sergeant, Inspector, Public Order...) are stored as an object, not a number
+    const pe = (mtype.requirements || {}).personnel_educations;
+    if (pe && typeof pe === 'object') {
+      for (const [key, n] of Object.entries(pe)) {
+        if (!n || key in (mtype.requirements || {})) continue; // ones with a vehicle requirement of their own are handled below
+        const e = personnelByKey(key, n);
+        if (e) list.push(e);
+        else notes.push(`${n} × ${prettyKey(key)} personnel, not selected`);
+      }
+    }
     for (const [key, count] of Object.entries(mtype.requirements || {})) {
       if (!count || typeof count !== 'number') continue;
       if (key in chances && chances[key] < 100 && !CFG.own.includeChanceRequirements) {
@@ -388,6 +416,7 @@
   }
 
   function fillNeeds(needs, triedLoadMore) {
+    learnRoleVehicles(); // also picks up vehicles that only arrived with "load more"
     // Order by REQS priority (specific first)
     const ordered = [...needs.list].sort((a, b) => REQS.indexOf(a.req) - REQS.indexOf(b.req));
     const short = [];
@@ -434,11 +463,14 @@
     return vehicleRows()
       .filter((tr) => !checkbox(tr)?.checked)
       .filter((tr) => matches(tr, req))
+      // SGT / INSP / PO vehicles are only sent for their own role, not as ordinary police cars
+      .filter((tr) => !c.keepRoleVehiclesFree || req.vtype || !ROLE_VTYPES.has(tr.getAttribute('vehicle_type')))
       .filter((tr) => !c.excludeCaptionPrefixes.some((p) => (tr.getAttribute('vehicle_caption') || '').startsWith(p)))
       .filter((tr) => withinDistance(tr, c.maxDistanceMiles));
   }
 
   function matches(tr, req) {
+    if (req.vtype) return tr.getAttribute('vehicle_type') === req.vtype;
     const cb = checkbox(tr);
     if (!cb) return false;
     return attrsMatch(+cb.getAttribute('vehicle_type_id'), (a) => cb.getAttribute(a), req);
@@ -460,15 +492,20 @@
   // Units already driving to the mission count towards what's needed
   function subtractDriving(list) {
     const typeAttrs = ls.get(LS_TYPES, {});
-    const driving = [...document.querySelectorAll('#mission_vehicle_driving tbody tr [vehicle_type_id]')].map((e) => +e.getAttribute('vehicle_type_id'));
+    const roles = ls.get(LS_ROLES, {});
+    const driving = [...document.querySelectorAll('#mission_vehicle_driving tbody tr [vehicle_type_id]')].map((e) => {
+      const row = e.closest('tr');
+      return { t: +e.getAttribute('vehicle_type_id'), id: row && row.id ? row.id.replace('vehicle_row_', '') : '' };
+    });
     const claimed = {}; // group -> Set of driving-list indexes already counted
     const ordered = [...list].sort((a, b) => REQS.indexOf(a.req) - REQS.indexOf(b.req));
     for (const n of ordered) {
       const cl = n.req.group ? (claimed[n.req.group] = claimed[n.req.group] || new Set()) : null;
-      driving.forEach((t, i) => {
+      driving.forEach((v, i) => {
         if (n.count <= 0 || (cl && cl.has(i))) return;
-        const attrs = typeAttrs[t] || {};
-        if (attrsMatch(t, (a) => attrs[a], n.req)) { n.count--; if (cl) cl.add(i); }
+        const attrs = typeAttrs[v.t] || {};
+        const ok = n.req.vtype ? roles[v.id] === n.req.vtype : attrsMatch(v.t, (a) => attrs[a], n.req);
+        if (ok) { n.count--; if (cl) cl.add(i); }
       });
       n.count = Math.max(0, n.count);
     }
@@ -489,6 +526,18 @@
       changed = true;
     });
     if (changed) ls.set(LS_TYPES, known);
+  }
+
+  // Remember which vehicles are in your SGT / INSP / PO categories, so units already driving can be recognised
+  function learnRoleVehicles() {
+    const known = ls.get(LS_ROLES, {});
+    let changed = false;
+    document.querySelectorAll('#vehicle_show_table_body_all tr[vehicle_type]').forEach((tr) => {
+      const t = tr.getAttribute('vehicle_type');
+      const id = tr.getAttribute('vehicle_id');
+      if (id && ROLE_VTYPES.has(t) && known[id] !== t) { known[id] = t; changed = true; }
+    });
+    if (changed) ls.set(LS_ROLES, known);
   }
 
   function missionTypeId() {
