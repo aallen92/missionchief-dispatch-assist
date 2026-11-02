@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.3.0
+// @version      2.4.0
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -46,6 +46,8 @@
       // already includes the Ambulance Officer and Mass Casualty Equipment. If that page can't be read, and the
       // mission is guaranteed at least this many patients, send one of each anyway. 0 = off.
       largeIncidentMinPatients: 10,
+      // Patients needing Critical Care: send one Rapid Response Vehicle (one covers all of them)
+      rrvForCriticalCare: true,
       // Keep your SGT / INSP / POONE / POTWO vehicles for their own role instead of using them as ordinary police cars
       keepRoleVehiclesFree: true,
     },
@@ -61,7 +63,11 @@
   //  attr / any / types: how to recognise a matching vehicle in the dispatch list
   // Order matters: specific units first, generic ones (fire engines) last, so e.g. a Rescue Pump
   // picked for "rescue support" also counts towards fire engines.
+  // Rapid Response Vehicle (the 'fly_car' flag, not the broader fly_car_any that PRV/SRV also carry).
+  // The game has no mission requirement for it; it is used for patients who need Critical Care.
+  const RRV_REQ = { keys: [], captions: ['rapid response vehicle', 'rrv'], attr: 'fly_car' };
   const REQS = [
+    RRV_REQ,
     { keys: ['hazard_response_primary'], captions: ['primary response vehicle', 'prv'], types: [27] },
     { keys: ['hazard_response_secondary'], captions: ['secondary response vehicle', 'srv'], types: [28] },
     { keys: ['ems_mobile_command'], captions: ['ambulance control unit', 'acu'], types: [31] },
@@ -326,9 +332,16 @@
       if (!mceHere) needs.list.push({ req: mceReq, label: 'mass casualty equipment (patients)', count: 1 });
     }
 
-    // Other per-patient needs the script can't fill yet (e.g. Critical Care) get flagged
-    const cc = patients.filter((p) => [...p.querySelectorAll('.alert')].some((a) => /We need:.*Critical Care/i.test(a.textContent))).length;
-    if (cc) needs.unknown.push(`${cc} × Critical Care (patients)`);
+    // Critical Care: one Rapid Response Vehicle covers every patient that needs it, so send one
+    // unless there is already one on scene or on its way
+    const needsCc = patients.some((p) => [...p.querySelectorAll('.alert')].some((a) => /We need:.*Critical Care/i.test(a.textContent)));
+    if (needsCc && CFG.own.rrvForCriticalCare && !needs.list.some((n) => n.req === RRV_REQ)) {
+      const isRrv = (e) => { const t = +e.getAttribute('vehicle_type_id'); return attrsMatch(t, (a) => (typeAttrs[t] || {})[a], RRV_REQ); };
+      const rrvHere = [...document.querySelectorAll('#mission_vehicle_at_mission tbody tr [vehicle_type_id], #mission_vehicle_driving tbody tr [vehicle_type_id]')].some(isRrv);
+      if (!rrvHere) needs.list.push({ req: RRV_REQ, label: 'rapid response vehicle (critical care)', count: 1 });
+    } else if (needsCc && !CFG.own.rrvForCriticalCare) {
+      needs.unknown.push('Critical Care (patients)');
+    }
   }
 
 
