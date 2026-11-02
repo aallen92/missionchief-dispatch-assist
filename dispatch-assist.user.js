@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.2.1
+// @version      2.2.2
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -290,7 +290,7 @@
     let how;
     if (CFG.own.useTransportProbability) {
       const typeId = missionTypeId();
-      const mtype = typeId != null ? (await missionTypes())[typeId] : null;
+      const mtype = typeId != null ? pickMissionType(await missionTypes(), typeId) : null;
       const prob = mtype && mtype.chances && typeof mtype.chances.patient_transport === 'number' ? mtype.chances.patient_transport : 100;
       const rate = Math.min(1, (prob + CFG.own.transportGracePct) / 100);
       need = transportYes + Math.ceil(unknown * rate);
@@ -377,7 +377,7 @@
     // 3) Fresh mission: use the mission type's requirements
     const typeId = missionTypeId();
     if (typeId == null) { banner('Could not work out the mission type.', 'warn'); return null; }
-    const mtype = (await missionTypes())[typeId];
+    const mtype = pickMissionType(await missionTypes(), typeId);
     if (!mtype) { banner('Mission type ' + esc(typeId) + ' not found in mission data.', 'warn'); return null; }
     const chances = mtype.chances || {};
     const list = [];
@@ -553,6 +553,22 @@
     const help = document.querySelector('#mission_help');
     const m = help && (help.getAttribute('href') || '').match(/einsaetze\/(\d+)/);
     return m ? m[1] : null;
+  }
+
+  // Many missions come in variants ("a", "ab"...) that add requirements to the base mission
+  // (e.g. a Light Aircraft Crash variant also needs PRV, SRV, ATV carrier and foam).
+  // The game data lists each as "<type>/<variant>", so look that up first and fall back to the base mission.
+  function missionOverlays() {
+    const help = document.querySelector('#mission_help');
+    const m = help && (help.getAttribute('href') || '').match(/overlays?=([a-z]+)/i);
+    if (m) return m[1];
+    const doc = mainDoc();
+    const row = doc && doc.getElementById('mission_' + location.pathname.match(/\d+/)[0]);
+    return (row && row.getAttribute('data-additive-overlays')) || '';
+  }
+  function pickMissionType(types, typeId) {
+    const ov = missionOverlays();
+    return (ov && types[typeId + '/' + ov]) || types[typeId];
   }
 
   let typesPromise = null;
