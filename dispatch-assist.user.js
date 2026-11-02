@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         MissionChief – Dispatch Assist (HRL FO + own missions)
 // @namespace    https://www.missionchief.co.uk/
-// @version      2.2.2
+// @version      2.3.0
 // @description  Alliance missions: pre-selects your nearest free zHRL Fire Officer. Own missions: pre-selects the nearest units for everything still required. You still press Dispatch yourself.
 // @author       Aaron
 // @updateURL    https://raw.githubusercontent.com/aallen92/missionchief-dispatch-assist/main/dispatch-assist.user.js
@@ -42,10 +42,9 @@
       useTransportProbability: true,
       transportGracePct: 10,
       maxAmbulancesPerClick: 0,     // 0 = no cap. Set e.g. 20 to stop huge incidents ticking 100+ ambulances at once
-      // The game adds an Ambulance Officer and Mass Casualty Equipment itself once a big incident has
-      // patients, but they are missing from the mission data, so a fresh call never asks for them.
-      // If the mission is guaranteed at least this many patients (or already shows this many), send one of
-      // each straight away. 0 = off (then they only get sent once the game lists them as missing).
+      // Fallback only. Normally the script reads the game's own "Required ..." page for the call, which
+      // already includes the Ambulance Officer and Mass Casualty Equipment. If that page can't be read, and the
+      // mission is guaranteed at least this many patients, send one of each anyway. 0 = off.
       largeIncidentMinPatients: 10,
       // Keep your SGT / INSP / POONE / POTWO vehicles for their own role instead of using them as ordinary police cars
       keepRoleVehiclesFree: true,
@@ -406,14 +405,33 @@
       if (req) list.push({ req, label: req.captions[0], count });
       else unknown.push(`${count} × ${prettyKey(key)}`);
     }
-    // Big incidents: the game will ask for an Ambulance Officer and Mass Casualty Equipment later, so send them now
-    const bigMin = CFG.own.largeIncidentMinPatients;
-    if (bigMin > 0) {
-      const sure = Math.max(mtype.patientsMin || 0, document.querySelectorAll('.mission_patient').length);
-      if (sure >= bigMin) {
-        for (const key of ['kdow_orgl', 'mass_casualty_equipment']) {
-          const req = REQS.find((r) => r.keys.includes(key));
-          if (req && !list.some((n) => n.req === req)) list.push({ req, label: `${req.captions[0]} (large incident)`, count: 1 });
+    // The game's own requirements page for this exact call. It lists extras the mission data file lacks
+    // (PRV, SRV, welfare vehicle, ambulance officer, mass casualty equipment on big patient incidents).
+    const info = await gameRequirements();
+    if (info.length) {
+      unknown.length = 0; // the game's page is the authority, so drop the guesses from the data file
+      for (const [label, n] of info) {
+        if (PERSONNEL.some((p) => p.match.test(label))) continue; // people, handled above
+        const req = findReqByCaption(label);
+        if (!req) {
+          if (!NOT_VEHICLES.test(label)) unknown.push(`${n} × ${label}`);
+          continue;
+        }
+        if (req.keys.some((k) => k in chances && chances[k] < 100) && !CFG.own.includeChanceRequirements) continue;
+        const existing = list.find((x) => x.req === req);
+        if (existing) existing.count = Math.max(existing.count, n);
+        else list.push({ req, label: req.captions[0], count: n });
+      }
+    } else {
+      // Couldn't read the game's page: for big incidents, guess an Ambulance Officer and Mass Casualty Equipment
+      const bigMin = CFG.own.largeIncidentMinPatients;
+      if (bigMin > 0) {
+        const sure = Math.max(mtype.patientsMin || 0, document.querySelectorAll('.mission_patient').length);
+        if (sure >= bigMin) {
+          for (const key of ['kdow_orgl', 'mass_casualty_equipment']) {
+            const req = REQS.find((r) => r.keys.includes(key));
+            if (req && !list.some((n) => n.req === req)) list.push({ req, label: `${req.captions[0]} (large incident)`, count: 1 });
+          }
         }
       }
     }
@@ -544,6 +562,27 @@
       if (id && ROLE_VTYPES.has(t) && known[id] !== t) { known[id] = t; changed = true; }
     });
     if (changed) ls.set(LS_ROLES, known);
+  }
+
+  // Rows of the game's "Required ..." table for this exact mission (the mission's help link carries its id and variant)
+  const NOT_VEHICLES = /\b(stations?|bases?|extensions?|schools?|buildings?|cells?|beds?|hospitals?|departments?|dispatch|rooms?|academ\w*|depots?|sites?|centres?|centers?|garages?|halls?|offices?|headquarters|training)\b/i;
+  async function gameRequirements() {
+    const a = document.querySelector('#mission_help') || document.querySelector('#mission-type-helper-mobile');
+    const href = a && a.getAttribute('href');
+    if (!href) return [];
+    try {
+      const html = await fetch(href, { credentials: 'same-origin' }).then((r) => r.text());
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const out = [];
+      doc.querySelectorAll('tr').forEach((tr) => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length < 2) return;
+        const label = tds[0].textContent.replace(/\s+/g, ' ').trim();
+        const n = parseInt(tds[1].textContent, 10);
+        if (/^required\s/i.test(label) && n > 0) out.push([label.replace(/^required\s+/i, ''), n]);
+      });
+      return out;
+    } catch { return []; }
   }
 
   function missionTypeId() {
